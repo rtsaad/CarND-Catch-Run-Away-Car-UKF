@@ -34,8 +34,10 @@ int main()
   
   double target_x = 0.0;
   double target_y = 0.0;
+  double target_v = 0.0;
+  double target_yaw = 0.0;
 
-  h.onMessage([&ukf,&target_x,&target_y](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  h.onMessage([&ukf,&target_x,&target_y,&target_v,&target_yaw](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -107,19 +109,43 @@ int main()
 
 	  target_x = ukf.x_[0];
 	  target_y = ukf.x_[1];
+	  target_v = ukf.x_[2];
+	  target_yaw = ukf.x_[3];
 
     	  double heading_to_target = atan2(target_y - hunter_y, target_x - hunter_x);
     	  while (heading_to_target > M_PI) heading_to_target-=2.*M_PI; 
     	  while (heading_to_target <-M_PI) heading_to_target+=2.*M_PI;
     	  //turn towards the target
-    	  double heading_difference = heading_to_target - hunter_heading;
+    	  double heading_difference = (heading_to_target - hunter_heading);
     	  while (heading_difference > M_PI) heading_difference-=2.*M_PI; 
     	  while (heading_difference <-M_PI) heading_difference+=2.*M_PI;
 
     	  double distance_difference = sqrt((target_y - hunter_y)*(target_y - hunter_y) + (target_x - hunter_x)*(target_x - hunter_x));
 
-          json msgJson;
-          msgJson["turn"] = heading_difference;
+	  //From target speed and yaw, computes the target curvature radius
+	  //defines a delta t proportional to the distance and target heading.
+	  //target heading works as an adjustable coeficient
+	  // Perimeter (distance around circle) = Angle * Radius
+	  double delta_t = distance_difference*heading_to_target;//0.15;
+	  if(target_yaw < 0.0001)
+	    target_yaw=0.0001;
+	  //we consider the permiter covered to be the speed (target_v) * time (delta_t) 
+	  double target_radius = delta_t*target_v/target_yaw;
+	  //compute the perimeter distance to be covered by the target 
+	  double target_distance = target_radius*target_yaw;	  
+	  //compute beta
+	  //distance_difference is equal to hunter_radius beta = target_distance / hunter_radius
+	  if(distance_difference < 0.0001)
+	    distance_difference = 0.0001;
+	  double beta = target_distance/(distance_difference);	  
+	  //get hunter yaw difference 
+	  double beta_difference = (beta - hunter_heading);
+	  //normalise beta
+    	  while (beta_difference > M_PI) beta_difference-=2.*M_PI; 
+    	  while (beta_difference <-M_PI) beta_difference+=2.*M_PI;	  
+	  
+	  json msgJson;
+          msgJson["turn"] = beta_difference; 
           msgJson["dist"] = distance_difference; 
           auto msg = "42[\"move_hunter\"," + msgJson.dump() + "]";
           // std::cout << msg << std::endl;
